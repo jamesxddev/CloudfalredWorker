@@ -1,20 +1,23 @@
+using CloudFlaredWorker.Model;
+using Microsoft.Extensions.Options;
+using System;
 using System.Diagnostics;
-using System.Net.Http;
 
 namespace CloudFlaredWorker
 {
     public class Worker : BackgroundService
     {
         private readonly ILogger<Worker> _logger;
-        private readonly string _urlToCheck = "http://192.168.100.27:3001/info"; // Replace with your actual URL
+        private readonly CloudflareSettings _settings;
 
         private readonly HttpClient _httpClient = new();
         private Process? _cloudflaredProcess;
         private bool _cloudflaredRunning = false;
 
-        public Worker(ILogger<Worker> logger)
+        public Worker(ILogger<Worker> logger, IOptions<CloudflareSettings> options)
         {
             _logger = logger;
+            _settings = options.Value;
         }
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -49,25 +52,11 @@ namespace CloudFlaredWorker
         private void StartCloudflared()
         {
             var exePath = Path.Combine(AppContext.BaseDirectory, "Tools", "cloudflared.exe");
-            var certPath = Path.Combine(AppContext.BaseDirectory, "Tools", "cert.pem");
-            var credPath = Path.Combine(AppContext.BaseDirectory, "Tools", "75a93ea8-5c49-490a-b1ef-547010e567e2.json");
             var configPath = Path.Combine(AppContext.BaseDirectory, "Tools", "config.yml");
 
             if (!File.Exists(exePath))
             {
                 _logger.LogError($"cloudflared.exe not found at {exePath}");
-                return;
-            }
-
-            if (!File.Exists(certPath))
-            {
-                _logger.LogError($"cert.pem not found at {certPath}");
-                return;
-            }
-
-            if (!File.Exists(credPath))
-            {
-                _logger.LogError($"credential not found at {credPath}");
                 return;
             }
 
@@ -82,8 +71,6 @@ namespace CloudFlaredWorker
                 StartInfo = new ProcessStartInfo
                 {
                     FileName = exePath,
-                    //Arguments = $"--origincert \"{certPath}\" tunnel run malayanprints-tunnel",
-                    //Arguments = $"--origincert \"{certPath}\" tunnel run --credentials-file \"{credPath}\" malayanprints-tunnel",
                     Arguments = $"--config \"{configPath}\" tunnel run",
                     RedirectStandardOutput = true,
                     RedirectStandardError = true,
@@ -92,8 +79,9 @@ namespace CloudFlaredWorker
                 }
             };
 
-            _cloudflaredProcess.OutputDataReceived += (s, e) => _logger.LogInformation(e.Data);
-            _cloudflaredProcess.ErrorDataReceived += (s, e) => _logger.LogError(e.Data);
+            // disable cloudflared logs
+            //_cloudflaredProcess.OutputDataReceived += (s, e) => _logger.LogInformation(e.Data);
+            //_cloudflaredProcess.ErrorDataReceived += (s, e) => _logger.LogError(e.Data);
 
             _cloudflaredProcess.Start();
             _cloudflaredProcess.BeginOutputReadLine();
@@ -106,7 +94,8 @@ namespace CloudFlaredWorker
         {
             try
             {
-                var response = await _httpClient.GetAsync(_urlToCheck);
+                string url = _settings.UrlToCheck;
+                var response = await _httpClient.GetAsync(url);
                 return response.IsSuccessStatusCode;
             }
             catch (Exception ex)
